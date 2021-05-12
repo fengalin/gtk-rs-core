@@ -19,15 +19,11 @@ jobs:
           - nightly
           - "1.51.0"
         conf:
-          - { name: "atk", features: "v2_34", nightly: "--all-features", test_sys: true }
           - { name: "cairo", features: "png,pdf,svg,ps,use_glib,v1_16,freetype,script,xcb,xlib,win32-surface", nightly: "--features 'png,pdf,svg,ps,use_glib,v1_16,freetype,script,xcb,xlib,win32-surface'", test_sys: true }
-          - { name: "gdk", features: "v3_24", nightly: "--features v3_24", test_sys: true }
           - { name: "gdk-pixbuf", features: "v2_40", nightly: "--all-features", test_sys: true }
-          - { name: "gdkx11", features: "v3_24", nightly: "--all-features", test_sys: true }
           - { name: "gio", features: "v2_66", nightly: "--all-features", test_sys: false }
           - { name: "glib", features: "v2_66", nightly: "--all-features", test_sys: false }
           - { name: "graphene", features: "", nightly: "", test_sys: false }
-          - { name: "gtk", features: "v3_24_9", nightly: "--all-features", test_sys: false }
           - { name: "pango", features: "v1_46", nightly: "--all-features", test_sys: false }
           - { name: "pangocairo", features: "", nightly: "--all-features", test_sys: true }
     steps:
@@ -59,16 +55,13 @@ jobs:
       - run: cargo run --release -- --no-manual-traits ../glib-macros
         working-directory: checker
         if: matrix.rust == 'nightly' && matrix.conf.name == 'glib'
-      - run: cargo run --release -- --no-manual-traits ../gtk3-macros
-        working-directory: checker
-        if: matrix.rust == 'nightly' && matrix.conf.name == 'glib'
-      - run: ./check_init_asserts ../${{matrix.conf.name}}
-        working-directory: checker
-        if: matrix.rust == 'nightly' && (matrix.conf.name == 'atk' || matrix.conf.name == 'gdk' || matrix.conf.name == 'gdkx11' || matrix.conf.name == 'gtk')
       # tests run
       - name: tests nightly
         run: xvfb-run --auto-servernum cargo test --manifest-path ${{ matrix.conf.name }}/Cargo.toml ${{ matrix.conf.nightly }}
         if: matrix.rust == 'nightly'
+      - run: cargo run --release -- --no-manual-traits ../gtk3-macros
+        working-directory: checker
+        if: matrix.rust == 'nightly' && matrix.conf.name == 'glib'
       - name: tests sys nightly
         run: xvfb-run --auto-servernum cargo test --manifest-path ${{ matrix.conf.name }}/sys/Cargo.toml ${{ matrix.conf.nightly }}
         if: matrix.rust == 'nightly' && matrix.conf.test_sys
