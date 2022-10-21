@@ -69,15 +69,31 @@ impl<T> Clone for Channel<T> {
     }
 }
 
+#[test]
+fn channel_new_simple() {
+    // This is not possible with current API:
+    let _chan: Channel<()> = Channel::new(42);
+}
+
+#[test]
+fn channel_new_some() {
+    let _chan: Channel<()> = Channel::new(Some(42));
+}
+
+#[test]
+fn channel_new_none() {
+    let _chan: Channel<()> = Channel::new(None);
+}
+
 impl<T> Channel<T> {
-    fn new(bound: Option<usize>) -> Channel<T> {
+    fn new(bound: impl Into<Option<usize>>) -> Channel<T> {
         Channel(Arc::new((
             Mutex::new(ChannelInner {
                 queue: VecDeque::new(),
                 source: ChannelSourceState::NotAttached,
                 num_senders: 0,
             }),
-            bound.map(|bound| ChannelBound {
+            bound.into().map(|bound| ChannelBound {
                 bound,
                 cond: Condvar::new(),
             }),

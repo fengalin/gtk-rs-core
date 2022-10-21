@@ -18,6 +18,27 @@ crate::wrapper! {
     }
 }
 
+#[test]
+fn signal_group_target_simple() {
+    let obj: crate::Object = crate::Object::builder().build();
+    // This is not possible with current API:
+    SignalGroup::new(crate::Object::static_type()).set_target(&obj);
+}
+
+#[test]
+fn signal_group_target_some() {
+    let obj: crate::Object = crate::Object::builder().build();
+    SignalGroup::new(crate::Object::static_type()).set_target(Some(&obj));
+}
+
+#[test]
+fn signal_group_target_none() {
+    // This is the only solution with currnet API:
+    SignalGroup::new(crate::Object::static_type()).set_target(crate::Object::NONE);
+    // This is not possible with current API:
+    SignalGroup::new(crate::Object::static_type()).set_target::<crate::Object>(None);
+}
+
 impl SignalGroup {
     #[doc(alias = "g_signal_group_new")]
     pub fn new(target_type: crate::types::Type) -> SignalGroup {
@@ -42,11 +63,11 @@ impl SignalGroup {
     }
 
     #[doc(alias = "g_signal_group_set_target")]
-    pub fn set_target(&self, target: Option<&impl IsA<Object>>) {
+    pub fn set_target<'a, O: IsA<Object>>(&self, target: impl Into<Option<&'a O>>) {
         unsafe {
             gobject_ffi::g_signal_group_set_target(
                 self.to_glib_none().0,
-                target.map(|p| p.as_ref()).to_glib_none().0,
+                target.into().map(|p| p.as_ref()).to_glib_none().0,
             );
         }
     }

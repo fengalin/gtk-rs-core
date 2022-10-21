@@ -542,13 +542,35 @@ macro_rules! define_param_spec_numeric {
     };
 }
 
+#[test]
+fn paramspec_bool_nick_simple() {
+    // These 2 are not possible with current API:
+    let _pspecb = ParamSpecBoolean::builder("test").set_nick("tm");
+    let _pspecb = ParamSpecBoolean::builder("test").set_nick(&String::from("tm"));
+}
+
+#[test]
+fn paramspec_bool_nick_some() {
+    let _pspecb = ParamSpecBoolean::builder("test").set_nick(Some("tm"));
+    let _pspecb = ParamSpecBoolean::builder("test").set_nick(Some(&String::from("tm")));
+
+    // Doesn't compile with current API nor with the `Into<Option<_>>`:
+    //          expected `&str`, found struct `std::string::String` v
+    //let _pspecb = ParamSpecBoolean::builder("test").set_nick(Some(String::from("tm")));
+}
+
+#[test]
+fn paramspec_bool_nick_none() {
+    let _pspecb = ParamSpecBoolean::builder("test").set_nick::<str>(None);
+}
+
 /// A trait implemented by the various [`ParamSpec`] builder types.
 ///
 /// It is useful for providing a builder pattern for [`ParamSpec`] defined
 /// outside of GLib like in GStreamer or GTK 4.
 pub trait ParamSpecBuilderExt<'a>: Sized {
     /// Implementation detail.
-    fn set_nick(&mut self, nick: Option<&'a str>);
+    fn set_nick<S: AsRef<str> + 'a + ?Sized>(&mut self, nick: impl Into<Option<&'a S>>);
     /// Implementation detail.
     fn set_blurb(&mut self, blurb: Option<&'a str>);
     /// Implementation detail.
@@ -645,8 +667,8 @@ macro_rules! define_builder {
         }
 
         impl<'a> crate::prelude::ParamSpecBuilderExt<'a> for $builder_type<'a> {
-            fn set_nick(&mut self, nick: Option<&'a str>) {
-                self.nick = nick;
+            fn set_nick<S: AsRef<str> +'a + ?Sized>(&mut self, nick: impl Into<Option<&'a S>>) {
+                self.nick = nick.into().map(AsRef::as_ref);
             }
             fn set_blurb(&mut self, blurb: Option<&'a str>) {
                 self.blurb = blurb;
@@ -989,8 +1011,8 @@ impl<'a, T: StaticType + FromGlib<i32> + IntoGlib<GlibType = i32>> ParamSpecEnum
 impl<'a, T: StaticType + FromGlib<i32> + IntoGlib<GlibType = i32>>
     crate::prelude::ParamSpecBuilderExt<'a> for ParamSpecEnumBuilder<'a, T>
 {
-    fn set_nick(&mut self, nick: Option<&'a str>) {
-        self.nick = nick;
+    fn set_nick<S: AsRef<str> + 'a + ?Sized>(&mut self, nick: impl Into<Option<&'a S>>) {
+        self.nick = nick.into().map(AsRef::as_ref);
     }
     fn set_blurb(&mut self, blurb: Option<&'a str>) {
         self.blurb = blurb;
@@ -1113,8 +1135,8 @@ impl<'a, T: StaticType + FromGlib<u32> + IntoGlib<GlibType = u32>> ParamSpecFlag
 impl<'a, T: StaticType + FromGlib<u32> + IntoGlib<GlibType = u32>>
     crate::prelude::ParamSpecBuilderExt<'a> for ParamSpecFlagsBuilder<'a, T>
 {
-    fn set_nick(&mut self, nick: Option<&'a str>) {
-        self.nick = nick;
+    fn set_nick<S: AsRef<str> + 'a + ?Sized>(&mut self, nick: impl Into<Option<&'a S>>) {
+        self.nick = nick.into().map(AsRef::as_ref);
     }
     fn set_blurb(&mut self, blurb: Option<&'a str>) {
         self.blurb = blurb;
@@ -1233,8 +1255,8 @@ impl<'a> ParamSpecStringBuilder<'a> {
 }
 
 impl<'a> crate::prelude::ParamSpecBuilderExt<'a> for ParamSpecStringBuilder<'a> {
-    fn set_nick(&mut self, nick: Option<&'a str>) {
-        self.nick = nick;
+    fn set_nick<S: AsRef<str> + 'a + ?Sized>(&mut self, nick: impl Into<Option<&'a S>>) {
+        self.nick = nick.into().map(AsRef::as_ref);
     }
     fn set_blurb(&mut self, blurb: Option<&'a str>) {
         self.blurb = blurb;
@@ -1344,8 +1366,8 @@ impl<'a, T: StaticType> ParamSpecBoxedBuilder<'a, T> {
 }
 
 impl<'a, T: StaticType> crate::prelude::ParamSpecBuilderExt<'a> for ParamSpecBoxedBuilder<'a, T> {
-    fn set_nick(&mut self, nick: Option<&'a str>) {
-        self.nick = nick;
+    fn set_nick<S: AsRef<str> + 'a + ?Sized>(&mut self, nick: impl Into<Option<&'a S>>) {
+        self.nick = nick.into().map(AsRef::as_ref);
     }
     fn set_blurb(&mut self, blurb: Option<&'a str>) {
         self.blurb = blurb;
@@ -1469,8 +1491,8 @@ impl<'a> ParamSpecValueArrayBuilder<'a> {
 }
 
 impl<'a> crate::prelude::ParamSpecBuilderExt<'a> for ParamSpecValueArrayBuilder<'a> {
-    fn set_nick(&mut self, nick: Option<&'a str>) {
-        self.nick = nick;
+    fn set_nick<S: AsRef<str> + 'a + ?Sized>(&mut self, nick: impl Into<Option<&'a S>>) {
+        self.nick = nick.into().map(AsRef::as_ref);
     }
     fn set_blurb(&mut self, blurb: Option<&'a str>) {
         self.blurb = blurb;
@@ -1546,8 +1568,8 @@ impl<'a, T: StaticType> ParamSpecObjectBuilder<'a, T> {
 }
 
 impl<'a, T: StaticType> crate::prelude::ParamSpecBuilderExt<'a> for ParamSpecObjectBuilder<'a, T> {
-    fn set_nick(&mut self, nick: Option<&'a str>) {
-        self.nick = nick;
+    fn set_nick<S: AsRef<str> + 'a + ?Sized>(&mut self, nick: impl Into<Option<&'a S>>) {
+        self.nick = nick.into().map(AsRef::as_ref);
     }
     fn set_blurb(&mut self, blurb: Option<&'a str>) {
         self.blurb = blurb;
@@ -1787,8 +1809,8 @@ impl<'a> ParamSpecVariantBuilder<'a> {
 }
 
 impl<'a> crate::prelude::ParamSpecBuilderExt<'a> for ParamSpecVariantBuilder<'a> {
-    fn set_nick(&mut self, nick: Option<&'a str>) {
-        self.nick = nick;
+    fn set_nick<S: AsRef<str> + 'a + ?Sized>(&mut self, nick: impl Into<Option<&'a S>>) {
+        self.nick = nick.into().map(AsRef::as_ref);
     }
     fn set_blurb(&mut self, blurb: Option<&'a str>) {
         self.blurb = blurb;

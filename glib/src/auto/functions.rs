@@ -709,15 +709,91 @@ pub fn spaced_primes_closest(num: u32) -> u32 {
     unsafe { ffi::g_spaced_primes_closest(num) }
 }
 
+#[test]
+fn spawn_async_simple_closure() {
+    use std::path;
+
+    // This is not possible with current API:
+    let _res = spawn_async(
+        path::Path::new("."),
+        &[path::Path::new("test")],
+        &[],
+        SpawnFlags::empty(),
+        || {},
+    );
+}
+
+#[test]
+fn spawn_async_some_fn_ptr() {
+    use std::path;
+
+    fn dummy_fn() {}
+
+    let _res = spawn_async(
+        Some(path::Path::new(".")),
+        &[path::Path::new("test")],
+        &[],
+        SpawnFlags::empty(),
+        dummy_fn,
+    );
+}
+
+#[test]
+fn spawn_async_none() {
+    use std::path;
+
+    let _res = spawn_async::<path::Path, _>(
+        None,
+        &[path::Path::new("test")],
+        &[],
+        SpawnFlags::empty(),
+        || {},
+    );
+
+    // This requires type annotations due to the `Into<Option<_>>` changes.
+    let _res = spawn_async::<path::Path, fn()>(
+        None,
+        &[path::Path::new("test")],
+        &[],
+        SpawnFlags::empty(),
+        None,
+    );
+
+    // Ideally, we would like this:
+    /*
+    const SPAWN_ASYNC_FN_NONE: Option<fn()> = None;
+
+    // Compilation fails, but shouldn't IMO:
+    //                 cannot infer type v
+    let _res = spawn_async::<path::Path, _>(
+        None,
+        &[path::Path::new("test")],
+        &[],
+        SpawnFlags::empty(),
+        SPAWN_ASYNC_FN_NONE,
+    );
+    */
+}
+
 #[doc(alias = "g_spawn_async")]
-pub fn spawn_async(
-    working_directory: Option<impl AsRef<std::path::Path>>,
+pub fn spawn_async<'a, D, F>(
+    working_directory: impl Into<Option<&'a D>>,
     argv: &[&std::path::Path],
     envp: &[&std::path::Path],
     flags: SpawnFlags,
-    child_setup: Option<Box_<dyn FnOnce() + 'static>>,
-) -> Result<Pid, crate::Error> {
-    let child_setup_data: Box_<Option<Box_<dyn FnOnce() + 'static>>> = Box_::new(child_setup);
+    // In gtk-core-rs/glib, `child_setup` is required to already be `Box_<dyn ..>`,
+    // Not sure why.
+    child_setup: impl Into<Option<F>>,
+) -> Result<Pid, crate::Error>
+where
+    D: AsRef<std::path::Path> + 'a + ?Sized,
+    F: FnOnce() + 'static,
+{
+    // This is the only change regarding `child_setup` handling.
+    let child_setup_data = Box::new(child_setup.into().map(|f| {
+        let f: Box_<dyn FnOnce() + 'static> = Box_::new(f);
+        f
+    }));
     unsafe extern "C" fn child_setup_func(user_data: ffi::gpointer) {
         let callback: Box_<Option<Box_<dyn FnOnce() + 'static>>> =
             Box_::from_raw(user_data as *mut _);
@@ -735,6 +811,7 @@ pub fn spawn_async(
         let mut error = ptr::null_mut();
         let is_ok = ffi::g_spawn_async(
             working_directory
+                .into()
                 .as_ref()
                 .map(|p| p.as_ref())
                 .to_glib_none()
