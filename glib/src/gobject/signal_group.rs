@@ -192,12 +192,12 @@ mod tests {
                 format!("Hello")
             }),
         );
-        group.set_target(Some(&obj));
+        group.set_target(&obj);
         obj.emit_by_name::<()>("sig-with-args", &[&5u32, &"World"]);
         assert_eq!(*store.borrow(), "a 5 b World");
         let ret = obj.emit_by_name::<String>("sig-with-ret", &[]);
         assert_eq!(ret, "Hello");
-        group.set_target(Object::NONE);
+        group.discard_target();
         let ret = obj.emit_by_name::<Option<String>>("sig-with-ret", &[]);
         assert_eq!(ret, None);
     }

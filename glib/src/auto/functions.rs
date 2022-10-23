@@ -713,84 +713,126 @@ pub fn spaced_primes_closest(num: u32) -> u32 {
 fn spawn_async_simple_closure() {
     use std::path;
 
-    // This is not possible with current API:
-    let _res = spawn_async(
-        path::Path::new("."),
-        &[path::Path::new("test")],
-        &[],
-        SpawnFlags::empty(),
-        || {},
-    );
+    // This is not possible with current API
+    // without resorting to `Some()` for `working_directory`:
+    let _res = SpawnAsyncInvoker::new(&[path::Path::new("test")], &[], SpawnFlags::empty())
+        .working_directory(&path::Path::new("."))
+        // Note: no `child_setup` here => just like using `None`
+        .invoke();
 }
 
 #[test]
-fn spawn_async_some_fn_ptr() {
+fn spawn_async_with_fn_ptr_or_closure() {
     use std::path;
 
     fn dummy_fn() {}
 
-    let _res = spawn_async(
-        Some(path::Path::new(".")),
-        &[path::Path::new("test")],
-        &[],
-        SpawnFlags::empty(),
-        dummy_fn,
-    );
+    let _res = SpawnAsyncInvoker::new(&[path::Path::new("test")], &[], SpawnFlags::empty())
+        .working_directory(&path::Path::new("."))
+        .child_setup(dummy_fn)
+        .invoke();
+
+    // This is not possible with current API (with resorting to `Some()`):
+    let _res = SpawnAsyncInvoker::new(&[path::Path::new("test")], &[], SpawnFlags::empty())
+        .working_directory(&path::Path::new("."))
+        .child_setup(|| {})
+        .invoke();
 }
 
 #[test]
 fn spawn_async_none() {
     use std::path;
 
-    let _res = spawn_async::<path::Path, _>(
-        None,
-        &[path::Path::new("test")],
-        &[],
-        SpawnFlags::empty(),
-        || {},
-    );
+    let _res = SpawnAsyncInvoker::new(&[path::Path::new("test")], &[], SpawnFlags::empty())
+        // Note: no `working_directory` here
+        .child_setup(|| {})
+        .invoke();
 
-    // This requires type annotations due to the `Into<Option<_>>` changes.
-    let _res = spawn_async::<path::Path, fn()>(
-        None,
-        &[path::Path::new("test")],
-        &[],
-        SpawnFlags::empty(),
-        None,
-    );
+    let _res = SpawnAsyncInvoker::new(&[path::Path::new("test")], &[], SpawnFlags::empty())
+        // Note: no `working_directory` nor `child_setup` here
+        .invoke();
+}
 
-    // Ideally, we would like this:
-    /*
-    const SPAWN_ASYNC_FN_NONE: Option<fn()> = None;
+pub struct SpawnAsyncInvoker<'a> {
+    working_directory: Option<&'a dyn AsRef<std::path::Path>>,
+    argv: &'a [&'a std::path::Path],
+    envp: &'a [&'a std::path::Path],
+    flags: SpawnFlags,
+}
 
-    // Compilation fails, but shouldn't IMO:
-    //                 cannot infer type v
-    let _res = spawn_async::<path::Path, _>(
-        None,
-        &[path::Path::new("test")],
-        &[],
-        SpawnFlags::empty(),
-        SPAWN_ASYNC_FN_NONE,
-    );
-    */
+impl<'a> SpawnAsyncInvoker<'a> {
+    pub fn new(
+        argv: &'a [&std::path::Path],
+        envp: &'a [&std::path::Path],
+        flags: SpawnFlags,
+    ) -> Self {
+        Self {
+            working_directory: None,
+            argv,
+            envp,
+            flags,
+        }
+    }
+
+    pub fn working_directory(mut self, working_directory: &'a dyn AsRef<std::path::Path>) -> Self {
+        self.working_directory = Some(working_directory);
+        self
+    }
+
+    pub fn child_setup<F: FnOnce() + 'static>(
+        self,
+        child_setup: F,
+    ) -> SpawnAsyncChildSetupInvoker<'a, F> {
+        SpawnAsyncChildSetupInvoker {
+            working_directory: self.working_directory,
+            argv: self.argv,
+            envp: self.envp,
+            flags: self.flags,
+            child_setup,
+        }
+    }
+
+    pub fn invoke(self) -> Result<Pid, crate::Error> {
+        spawn_async(
+            self.working_directory,
+            self.argv,
+            self.envp,
+            self.flags,
+            Option::<Box<dyn FnOnce() + 'static>>::None,
+        )
+    }
+}
+
+pub struct SpawnAsyncChildSetupInvoker<'a, F: FnOnce() + 'static> {
+    working_directory: Option<&'a dyn AsRef<std::path::Path>>,
+    argv: &'a [&'a std::path::Path],
+    envp: &'a [&'a std::path::Path],
+    flags: SpawnFlags,
+    child_setup: F,
+}
+
+impl<'a, F: FnOnce() + 'static> SpawnAsyncChildSetupInvoker<'a, F> {
+    pub fn invoke(self) -> Result<Pid, crate::Error> {
+        spawn_async(
+            self.working_directory,
+            self.argv,
+            self.envp,
+            self.flags,
+            Some(self.child_setup),
+        )
+    }
 }
 
 #[doc(alias = "g_spawn_async")]
-pub fn spawn_async<'a, D, F>(
-    working_directory: impl Into<Option<&'a D>>,
+pub fn spawn_async<'a, F: FnOnce() + 'static>(
+    working_directory: Option<&'a dyn AsRef<std::path::Path>>,
     argv: &[&std::path::Path],
     envp: &[&std::path::Path],
     flags: SpawnFlags,
-    // In gtk-core-rs/glib, `child_setup` is required to already be `Box_<dyn ..>`,
-    // Not sure why.
-    child_setup: impl Into<Option<F>>,
-) -> Result<Pid, crate::Error>
-where
-    D: AsRef<std::path::Path> + 'a + ?Sized,
-    F: FnOnce() + 'static,
-{
+    child_setup: Option<F>,
+) -> Result<Pid, crate::Error> {
     // This is the only change regarding `child_setup` handling.
-    let child_setup_data = Box::new(child_setup.into().map(|f| {
+    let child_setup_data = Box::new(child_setup.map(|f| {
         let f: Box_<dyn FnOnce() + 'static> = Box_::new(f);
         f
     }));
@@ -811,7 +853,6 @@ where
         let mut error = ptr::null_mut();
         let is_ok = ffi::g_spawn_async(
             working_directory
-                .into()
                 .as_ref()
                 .map(|p| p.as_ref())
                 .to_glib_none()

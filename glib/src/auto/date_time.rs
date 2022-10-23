@@ -24,19 +24,16 @@ crate::wrapper! {
 #[test]
 fn from_iso8601_simple() {
     let tz = TimeZone::local();
-    // This is not possible with current API:
-    let _dt = DateTime::from_iso8601("20221021", &tz);
-}
+    // This is not possible with current API
+    // without resorting to `Some(&tz)`:
+    let _dt = DateTime::from_iso8601_with_tz("20221021", &tz);
 
-#[test]
-fn from_iso8601_some() {
-    let tz = TimeZone::local();
-    let _dt = DateTime::from_iso8601("20221021", Some(&tz));
-}
+    // This is equivalent to using `None` with current API:
+    let _dt = DateTime::from_iso8601("20221021");
 
-#[test]
-fn from_iso8601_none() {
-    let _dt = DateTime::from_iso8601("20221021", None);
+    // The `Some()` and `None` would be no longer necessary:
+    //let _dt = DateTime::from_iso8601("20221021", Some(&tz));
+    //let _dt = DateTime::from_iso8601("20221021", None);
 }
 
 impl DateTime {
@@ -66,14 +63,23 @@ impl DateTime {
 
     #[doc(alias = "g_date_time_new_from_iso8601")]
     #[doc(alias = "new_from_iso8601")]
-    pub fn from_iso8601<'a>(
-        text: &str,
-        default_tz: impl Into<Option<&'a TimeZone>>,
-    ) -> Result<DateTime, BoolError> {
+    pub fn from_iso8601(text: &str) -> Result<DateTime, BoolError> {
         unsafe {
             Option::<_>::from_glib_full(ffi::g_date_time_new_from_iso8601(
                 text.to_glib_none().0,
-                default_tz.into().to_glib_none().0,
+                Option::<&TimeZone>::None.to_glib_none().0,
+            ))
+            .ok_or_else(|| crate::bool_error!("Invalid date"))
+        }
+    }
+
+    #[doc(alias = "g_date_time_new_from_iso8601")]
+    #[doc(alias = "new_from_iso8601")]
+    pub fn from_iso8601_with_tz(text: &str, default_tz: &TimeZone) -> Result<DateTime, BoolError> {
+        unsafe {
+            Option::<_>::from_glib_full(ffi::g_date_time_new_from_iso8601(
+                text.to_glib_none().0,
+                default_tz.to_glib_none().0,
             ))
             .ok_or_else(|| crate::bool_error!("Invalid date"))
         }

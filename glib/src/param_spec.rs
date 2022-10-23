@@ -544,24 +544,20 @@ macro_rules! define_param_spec_numeric {
 
 #[test]
 fn paramspec_bool_nick_simple() {
-    // These 2 are not possible with current API:
-    let _pspecb = ParamSpecBoolean::builder("test").set_nick("tm");
-    let _pspecb = ParamSpecBoolean::builder("test").set_nick(&String::from("tm"));
-}
-
-#[test]
-fn paramspec_bool_nick_some() {
-    let _pspecb = ParamSpecBoolean::builder("test").set_nick(Some("tm"));
-    let _pspecb = ParamSpecBoolean::builder("test").set_nick(Some(&String::from("tm")));
-
-    // Doesn't compile with current API nor with the `Into<Option<_>>`:
-    //          expected `&str`, found struct `std::string::String` v
-    //let _pspecb = ParamSpecBoolean::builder("test").set_nick(Some(String::from("tm")));
-}
-
-#[test]
-fn paramspec_bool_nick_none() {
-    let _pspecb = ParamSpecBoolean::builder("test").set_nick::<str>(None);
+    // This was actually addressed by current API via the `nick` setter.
+    // `set_nick` doesn't seem necessary as the default is `None` for the
+    // builder (or the empty string for the resulting `nick`).
+    // Should the builder provide a means to reset the `nick` (e.g.
+    // because it would be passed around between multiple intializers,
+    // we could introduce a `reset_nick` or `discard_nick` setter.
+    let pspec = ParamSpecBoolean::builder("test").nick(&"tm").build();
+    assert_eq!(pspec.nick(), "tm");
+    let pspec = ParamSpecBoolean::builder("test")
+        .nick(&String::from("tm"))
+        .build();
+    assert_eq!(pspec.nick(), "tm");
+    let pspec = ParamSpecBoolean::builder("test").build();
+    assert_eq!(pspec.nick(), "");
 }
 
 /// A trait implemented by the various [`ParamSpec`] builder types.
@@ -570,7 +566,7 @@ fn paramspec_bool_nick_none() {
 /// outside of GLib like in GStreamer or GTK 4.
 pub trait ParamSpecBuilderExt<'a>: Sized {
     /// Implementation detail.
-    fn set_nick<S: AsRef<str> + 'a + ?Sized>(&mut self, nick: impl Into<Option<&'a S>>);
+    fn set_nick(&mut self, nick: &'a dyn AsRef<str>);
     /// Implementation detail.
     fn set_blurb(&mut self, blurb: Option<&'a str>);
     /// Implementation detail.
@@ -580,8 +576,8 @@ pub trait ParamSpecBuilderExt<'a>: Sized {
 
     /// By default, the nickname of its redirect target will be used if it has one.
     /// Otherwise, `self.name` will be used.
-    fn nick(mut self, nick: &'a str) -> Self {
-        self.set_nick(Some(nick));
+    fn nick(mut self, nick: &'a dyn AsRef<str>) -> Self {
+        self.set_nick(nick);
         self
     }
 
@@ -667,8 +663,8 @@ macro_rules! define_builder {
         }
 
         impl<'a> crate::prelude::ParamSpecBuilderExt<'a> for $builder_type<'a> {
-            fn set_nick<S: AsRef<str> +'a + ?Sized>(&mut self, nick: impl Into<Option<&'a S>>) {
-                self.nick = nick.into().map(AsRef::as_ref);
+            fn set_nick(&mut self, nick: &'a dyn  AsRef<str>) {
+                self.nick = Some(nick.as_ref());
             }
             fn set_blurb(&mut self, blurb: Option<&'a str>) {
                 self.blurb = blurb;
@@ -1011,8 +1007,8 @@ impl<'a, T: StaticType + FromGlib<i32> + IntoGlib<GlibType = i32>> ParamSpecEnum
 impl<'a, T: StaticType + FromGlib<i32> + IntoGlib<GlibType = i32>>
     crate::prelude::ParamSpecBuilderExt<'a> for ParamSpecEnumBuilder<'a, T>
 {
-    fn set_nick<S: AsRef<str> + 'a + ?Sized>(&mut self, nick: impl Into<Option<&'a S>>) {
-        self.nick = nick.into().map(AsRef::as_ref);
+    fn set_nick(&mut self, nick: &'a dyn AsRef<str>) {
+        self.nick = Some(nick.as_ref());
     }
     fn set_blurb(&mut self, blurb: Option<&'a str>) {
         self.blurb = blurb;
@@ -1135,8 +1131,8 @@ impl<'a, T: StaticType + FromGlib<u32> + IntoGlib<GlibType = u32>> ParamSpecFlag
 impl<'a, T: StaticType + FromGlib<u32> + IntoGlib<GlibType = u32>>
     crate::prelude::ParamSpecBuilderExt<'a> for ParamSpecFlagsBuilder<'a, T>
 {
-    fn set_nick<S: AsRef<str> + 'a + ?Sized>(&mut self, nick: impl Into<Option<&'a S>>) {
-        self.nick = nick.into().map(AsRef::as_ref);
+    fn set_nick(&mut self, nick: &'a dyn AsRef<str>) {
+        self.nick = Some(nick.as_ref());
     }
     fn set_blurb(&mut self, blurb: Option<&'a str>) {
         self.blurb = blurb;
@@ -1255,8 +1251,8 @@ impl<'a> ParamSpecStringBuilder<'a> {
 }
 
 impl<'a> crate::prelude::ParamSpecBuilderExt<'a> for ParamSpecStringBuilder<'a> {
-    fn set_nick<S: AsRef<str> + 'a + ?Sized>(&mut self, nick: impl Into<Option<&'a S>>) {
-        self.nick = nick.into().map(AsRef::as_ref);
+    fn set_nick(&mut self, nick: &'a dyn AsRef<str>) {
+        self.nick = Some(nick.as_ref());
     }
     fn set_blurb(&mut self, blurb: Option<&'a str>) {
         self.blurb = blurb;
@@ -1366,8 +1362,8 @@ impl<'a, T: StaticType> ParamSpecBoxedBuilder<'a, T> {
 }
 
 impl<'a, T: StaticType> crate::prelude::ParamSpecBuilderExt<'a> for ParamSpecBoxedBuilder<'a, T> {
-    fn set_nick<S: AsRef<str> + 'a + ?Sized>(&mut self, nick: impl Into<Option<&'a S>>) {
-        self.nick = nick.into().map(AsRef::as_ref);
+    fn set_nick(&mut self, nick: &'a dyn AsRef<str>) {
+        self.nick = Some(nick.as_ref());
     }
     fn set_blurb(&mut self, blurb: Option<&'a str>) {
         self.blurb = blurb;
@@ -1491,8 +1487,8 @@ impl<'a> ParamSpecValueArrayBuilder<'a> {
 }
 
 impl<'a> crate::prelude::ParamSpecBuilderExt<'a> for ParamSpecValueArrayBuilder<'a> {
-    fn set_nick<S: AsRef<str> + 'a + ?Sized>(&mut self, nick: impl Into<Option<&'a S>>) {
-        self.nick = nick.into().map(AsRef::as_ref);
+    fn set_nick(&mut self, nick: &'a dyn AsRef<str>) {
+        self.nick = Some(nick.as_ref());
     }
     fn set_blurb(&mut self, blurb: Option<&'a str>) {
         self.blurb = blurb;
@@ -1568,8 +1564,8 @@ impl<'a, T: StaticType> ParamSpecObjectBuilder<'a, T> {
 }
 
 impl<'a, T: StaticType> crate::prelude::ParamSpecBuilderExt<'a> for ParamSpecObjectBuilder<'a, T> {
-    fn set_nick<S: AsRef<str> + 'a + ?Sized>(&mut self, nick: impl Into<Option<&'a S>>) {
-        self.nick = nick.into().map(AsRef::as_ref);
+    fn set_nick(&mut self, nick: &'a dyn AsRef<str>) {
+        self.nick = Some(nick.as_ref());
     }
     fn set_blurb(&mut self, blurb: Option<&'a str>) {
         self.blurb = blurb;
@@ -1809,8 +1805,8 @@ impl<'a> ParamSpecVariantBuilder<'a> {
 }
 
 impl<'a> crate::prelude::ParamSpecBuilderExt<'a> for ParamSpecVariantBuilder<'a> {
-    fn set_nick<S: AsRef<str> + 'a + ?Sized>(&mut self, nick: impl Into<Option<&'a S>>) {
-        self.nick = nick.into().map(AsRef::as_ref);
+    fn set_nick(&mut self, nick: &'a dyn AsRef<str>) {
+        self.nick = Some(nick.as_ref());
     }
     fn set_blurb(&mut self, blurb: Option<&'a str>) {
         self.blurb = blurb;

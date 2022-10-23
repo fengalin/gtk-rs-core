@@ -70,30 +70,40 @@ impl<T> Clone for Channel<T> {
 }
 
 #[test]
-fn channel_new_simple() {
+fn channel_new() {
     // This is not possible with current API:
+    // without resorting to `Some(42)`:
     let _chan: Channel<()> = Channel::new(42);
+    // This is equivalent to using `None` with current API:
+    let _chan: Channel<()> = Channel::default();
+
+    // The `Some()` and `None` would be no longer necessary:
+    //let _chan: Channel<()> = Channel::new(Some(42));
+    //let _chan: Channel<()> = Channel::new(None);
 }
 
-#[test]
-fn channel_new_some() {
-    let _chan: Channel<()> = Channel::new(Some(42));
-}
-
-#[test]
-fn channel_new_none() {
-    let _chan: Channel<()> = Channel::new(None);
-}
-
-impl<T> Channel<T> {
-    fn new(bound: impl Into<Option<usize>>) -> Channel<T> {
+impl<T> Default for Channel<T> {
+    fn default() -> Channel<T> {
         Channel(Arc::new((
             Mutex::new(ChannelInner {
                 queue: VecDeque::new(),
                 source: ChannelSourceState::NotAttached,
                 num_senders: 0,
             }),
-            bound.into().map(|bound| ChannelBound {
+            None,
+        )))
+    }
+}
+
+impl<T> Channel<T> {
+    fn new(bound: usize) -> Channel<T> {
+        Channel(Arc::new((
+            Mutex::new(ChannelInner {
+                queue: VecDeque::new(),
+                source: ChannelSourceState::NotAttached,
+                num_senders: 0,
+            }),
+            Some(ChannelBound {
                 bound,
                 cond: Condvar::new(),
             }),
@@ -578,7 +588,7 @@ impl MainContext {
     ///
     /// The returned `Sender` behaves the same as `std::sync::mpsc::Sender`.
     pub fn channel<T>(priority: Priority) -> (Sender<T>, Receiver<T>) {
-        let channel = Channel::new(None);
+        let channel = Channel::default();
         let receiver = Receiver(Some(channel.clone()), priority);
         let sender = Sender::new(&channel);
 
@@ -601,7 +611,7 @@ impl MainContext {
     ///
     /// The returned `SyncSender` behaves the same as `std::sync::mpsc::SyncSender`.
     pub fn sync_channel<T>(priority: Priority, bound: usize) -> (SyncSender<T>, Receiver<T>) {
-        let channel = Channel::new(Some(bound));
+        let channel = Channel::new(bound);
         let receiver = Receiver(Some(channel.clone()), priority);
         let sender = SyncSender::new(&channel);
 
