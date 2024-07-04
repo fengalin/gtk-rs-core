@@ -2369,6 +2369,234 @@ impl IntoGStr for &String {
     }
 }
 
+// rustdoc-stripper-ignore-next
+/// A trait to efficiently deal with `GStr` representations of a string,
+/// possibly embendding this representation as part of a type.
+pub trait IntoGStrCow<'a> {
+    // rustdoc-stripper-ignore-next
+    /// Runs a function with an `&GStr` and optionally transforms `self`
+    /// into the most efficient `Cow<'_, GStr>` representation.
+    ///
+    /// While [`IntoGStr::run_with_gstr`] is useful to efficiently run a function with a
+    /// `&GStr` representation of `self`, it can not return a type referencing:
+    ///
+    /// * `self`, because `self` is consumed by [`IntoGStr::run_with_gstr`].
+    /// * the `&GStr` representation, because it is a temporary value,
+    ///   possibly allocated on stack.
+    ///
+    /// `run_with_gstr_then_cow` accepts two functions:
+    ///
+    /// * The first function (`f`) behaves exactly the same as `run_with_gstr`. It is called
+    ///   with the most efficient temporary `&GStr` representation of `self` and returns
+    ///   a type which can't depend on this representation.
+    /// * The second function (`g`) receives a `Cow<'_, GStr>` built from `self` and the value
+    ///   returned by `f`. `g` can then return a type possibly depending on the `Cow<'_, GStr>`
+    ///   equivalent for `self`. In a code path for which the output type doesn't depend on
+    ///   the `Cow<'_, GStr>`, the `Cow` construction should be optimized out.
+    ///
+    /// # Examples
+    ///
+    /// This is a reimplementation of `glib::uri_parse_scheme` which can return an `Error` holding
+    /// a representation of the input `uri`. The function below accepts the same types as the original
+    /// `IntoGStr` based implementation.
+    ///
+    /// ```rust
+    /// # use std::borrow::Cow;
+    /// # use glib::{ffi, translate::{from_glib_full, ToGlibPtr}, IntoGStrCow, GStr, GString};
+    /// pub struct URIParseError<'a> {
+    ///    uri: Cow<'a, GStr>,
+    /// }
+    /// // Omitted: `Error` related trait implementations.
+    ///
+    /// pub fn uri_parse_scheme<'a>(uri: impl IntoGStrCow<'a>) -> Result<GString, URIParseError<'a>> {
+    ///     uri.run_with_gstr_then_cow(
+    ///         // This closure is called with &GStr
+    ///         |uri| {
+    ///             if uri.is_empty() {
+    ///                 return Ok(GString::new());
+    ///             }
+    ///
+    ///             unsafe {
+    ///                 let ret = ffi::g_uri_parse_scheme(uri.to_glib_none().0);
+    ///                 if ret.is_null() {
+    ///                     // An empty `Err` variant which `g` will be able to replace
+    ///                     // with an `URIParseError` embedding a representation of `self`
+    ///                     return Err(());
+    ///                 }
+    ///
+    ///                 Ok(from_glib_full(ret))
+    ///             }
+    ///         },
+    ///         // This closure is called with Cow<'a, GStr>
+    ///         // and will be optimized out in the `Ok(_)` path
+    ///         |uri, res| res.map_err(|_| URIParseError { uri }),
+    ///     )
+    /// }
+    /// ```
+    fn run_with_gstr_then_cow<T, F: FnOnce(&GStr) -> T, U, G: FnOnce(Cow<'a, GStr>, T) -> U>(
+        self,
+        f: F,
+        g: G,
+    ) -> U;
+
+    // rustdoc-stripper-ignore-next
+    /// Converts `self` into the most efficient `GStr` representation.
+    ///
+    /// See also [`Self::run_with_gstr_then_cow`] if this is needed only in
+    /// some cases depending on the result of a function called with `&GStr`.
+    fn into_gstr_cow(self) -> Cow<'a, GStr>;
+}
+
+impl<'a> IntoGStrCow<'a> for &'a GStr {
+    #[inline]
+    fn run_with_gstr_then_cow<T, F: FnOnce(&GStr) -> T, U, G: FnOnce(Cow<'a, GStr>, T) -> U>(
+        self,
+        f: F,
+        g: G,
+    ) -> U {
+        let t = f(self);
+        g(self.into(), t)
+    }
+
+    #[inline]
+    fn into_gstr_cow(self) -> Cow<'a, GStr> {
+        self.into()
+    }
+}
+
+impl IntoGStrCow<'static> for GString {
+    #[inline]
+    fn run_with_gstr_then_cow<
+        T,
+        F: FnOnce(&GStr) -> T,
+        U,
+        G: FnOnce(Cow<'static, GStr>, T) -> U,
+    >(
+        self,
+        f: F,
+        g: G,
+    ) -> U {
+        let t = f(self.as_gstr());
+        g(self.into(), t)
+    }
+
+    #[inline]
+    fn into_gstr_cow(self) -> Cow<'static, GStr> {
+        self.into()
+    }
+}
+
+impl<'a> IntoGStrCow<'a> for &'a GString {
+    #[inline]
+    fn run_with_gstr_then_cow<T, F: FnOnce(&GStr) -> T, U, G: FnOnce(Cow<'a, GStr>, T) -> U>(
+        self,
+        f: F,
+        g: G,
+    ) -> U {
+        let t = f(self.as_gstr());
+        g(self.into(), t)
+    }
+
+    #[inline]
+    fn into_gstr_cow(self) -> Cow<'a, GStr> {
+        self.as_gstr().into()
+    }
+}
+
+impl IntoGStrCow<'static> for &str {
+    #[inline]
+    fn run_with_gstr_then_cow<
+        T,
+        F: FnOnce(&GStr) -> T,
+        U,
+        G: FnOnce(Cow<'static, GStr>, T) -> U,
+    >(
+        self,
+        f: F,
+        g: G,
+    ) -> U {
+        if self.len() < MAX_STACK_ALLOCATION {
+            let t = {
+                let mut s = mem::MaybeUninit::<[u8; MAX_STACK_ALLOCATION]>::uninit();
+                let ptr = s.as_mut_ptr() as *mut u8;
+                let gs = unsafe {
+                    ptr::copy_nonoverlapping(self.as_ptr(), ptr, self.len());
+                    ptr.add(self.len()).write(0);
+                    GStr::from_utf8_with_nul_unchecked(slice::from_raw_parts(ptr, self.len() + 1))
+                };
+                f(gs)
+            };
+            g(GString::from(self).into(), t)
+        } else {
+            let owned = GString::from(self);
+            let t = f(owned.as_gstr());
+            g(owned.into(), t)
+        }
+    }
+
+    #[inline]
+    fn into_gstr_cow(self) -> Cow<'static, GStr> {
+        GString::from(self).into()
+    }
+}
+
+impl IntoGStrCow<'static> for String {
+    #[inline]
+    fn run_with_gstr_then_cow<
+        T,
+        F: FnOnce(&GStr) -> T,
+        U,
+        G: FnOnce(Cow<'static, GStr>, T) -> U,
+    >(
+        mut self,
+        f: F,
+        g: G,
+    ) -> U {
+        let len = self.len();
+        if len < self.capacity() {
+            self.reserve_exact(1);
+            self.push('\0');
+            let t = {
+                let gs = unsafe { GStr::from_utf8_with_nul_unchecked(self.as_bytes()) };
+                f(gs)
+            };
+            g(GString::from(self).into(), t)
+        } else if len < MAX_STACK_ALLOCATION {
+            self.as_str().run_with_gstr_then_cow(f, g)
+        } else {
+            let owned = GString::from(self);
+            let t = f(owned.as_gstr());
+            g(owned.into(), t)
+        }
+    }
+
+    #[inline]
+    fn into_gstr_cow(self) -> Cow<'static, GStr> {
+        GString::from(self).into()
+    }
+}
+
+impl IntoGStrCow<'static> for &String {
+    #[inline]
+    fn run_with_gstr_then_cow<
+        T,
+        F: FnOnce(&GStr) -> T,
+        U,
+        G: FnOnce(Cow<'static, GStr>, T) -> U,
+    >(
+        self,
+        f: F,
+        g: G,
+    ) -> U {
+        self.as_str().run_with_gstr_then_cow(f, g)
+    }
+
+    #[inline]
+    fn into_gstr_cow(self) -> Cow<'static, GStr> {
+        GString::from(self).into()
+    }
+}
+
 pub const NONE_STR: Option<&'static str> = None;
 
 // rustdoc-stripper-ignore-next
@@ -2543,5 +2771,167 @@ mod tests {
         }
         assert_eq!(mem::size_of::<GString>(), mem::size_of::<NoInline>());
         assert_eq!(mem::size_of::<GString>(), mem::size_of::<String>());
+    }
+
+    #[test]
+    fn run_with_gstr_then_cow() {
+        use std::mem;
+
+        fn test<'a>(val: impl IntoGStrCow<'a> + ToString) -> (Cow<'a, GStr>, String) {
+            let owned = val.to_string();
+            val.run_with_gstr_then_cow(
+                move |val| {
+                    assert_eq!(val, owned.as_str());
+                    owned
+                },
+                |cow, owned| {
+                    assert_eq!(cow.deref(), owned.as_str());
+                    (cow, owned)
+                },
+            )
+        }
+
+        let (cow_owned, owned) = {
+            let val = gstr!("GStr");
+            let (cow, owned) = test(val);
+            assert_eq!(
+                mem::discriminant(&cow),
+                mem::discriminant(&Cow::Borrowed(gstr!("GStr")))
+            );
+            (cow.into_owned(), owned)
+        };
+        assert_eq!(cow_owned.deref(), owned.as_str());
+
+        let (cow_owned, owned) = {
+            let val = &GString::from("&GString");
+            let (cow, owned) = test(val);
+            assert_eq!(
+                mem::discriminant(&cow),
+                mem::discriminant(&Cow::Borrowed(gstr!("GStr")))
+            );
+            (cow.into_owned(), owned)
+        };
+        assert_eq!(cow_owned.deref(), owned.as_str());
+
+        let (cow_owned, owned) = {
+            let val = GString::from("GString");
+            let (cow, owned) = test(val);
+            assert_eq!(
+                mem::discriminant(&cow),
+                mem::discriminant(&Cow::Owned(GString::new()))
+            );
+            (cow, owned)
+        };
+        assert_eq!(cow_owned.deref(), owned.as_str());
+
+        let (cow_owned, owned) = {
+            let val = "&str";
+            let (cow, owned) = test(val);
+            assert_eq!(
+                mem::discriminant(&cow),
+                mem::discriminant(&Cow::Owned(GString::new()))
+            );
+            (cow, owned)
+        };
+        assert_eq!(cow_owned.deref(), owned.as_str());
+
+        let (cow_owned, owned) = {
+            let val = String::from("String");
+            let (cow, owned) = test(val);
+            assert_eq!(
+                mem::discriminant(&cow),
+                mem::discriminant(&Cow::Owned(GString::new()))
+            );
+            (cow, owned)
+        };
+        assert_eq!(cow_owned.deref(), owned.as_str());
+
+        let (cow_owned, owned) = {
+            let val = &String::from("&String");
+            let (cow, owned) = test(val);
+            assert_eq!(
+                mem::discriminant(&cow),
+                mem::discriminant(&Cow::Owned(GString::new()))
+            );
+            (cow, owned)
+        };
+        assert_eq!(cow_owned.deref(), owned.as_str());
+    }
+
+    #[test]
+    fn into_gstr_cow() {
+        fn test<'a>(val: impl IntoGStrCow<'a> + ToString) -> (Cow<'a, GStr>, String) {
+            let owned = val.to_string();
+            let cow = val.into_gstr_cow();
+            assert_eq!(cow.deref(), owned.as_str());
+
+            (cow, owned)
+        }
+
+        let (cow_owned, owned) = {
+            let val = gstr!("GStr");
+            let (cow, owned) = test(val);
+            assert_eq!(
+                mem::discriminant(&cow),
+                mem::discriminant(&Cow::Borrowed(gstr!("")))
+            );
+            (cow.into_owned(), owned)
+        };
+        assert_eq!(cow_owned.deref(), owned.as_str());
+
+        let (cow_owned, owned) = {
+            let val = &GString::from("&GString");
+            let (cow, owned) = test(val);
+            assert_eq!(
+                mem::discriminant(&cow),
+                mem::discriminant(&Cow::Borrowed(gstr!("")))
+            );
+            (cow.into_owned(), owned)
+        };
+        assert_eq!(cow_owned.deref(), owned.as_str());
+
+        let (cow_owned, owned) = {
+            let val = GString::from("GString");
+            let (cow, owned) = test(val);
+            assert_eq!(
+                mem::discriminant(&cow),
+                mem::discriminant(&Cow::Owned(GString::new()))
+            );
+            (cow, owned)
+        };
+        assert_eq!(cow_owned.deref(), owned.as_str());
+
+        let (cow_owned, owned) = {
+            let val = "str";
+            let (cow, owned) = test(val);
+            assert_eq!(
+                mem::discriminant(&cow),
+                mem::discriminant(&Cow::Owned(GString::new()))
+            );
+            (cow, owned)
+        };
+        assert_eq!(cow_owned.deref(), owned.as_str());
+
+        let (cow_owned, owned) = {
+            let val = String::from("String");
+            let (cow, owned) = test(val);
+            assert_eq!(
+                mem::discriminant(&cow),
+                mem::discriminant(&Cow::Owned(GString::new()))
+            );
+            (cow, owned)
+        };
+        assert_eq!(cow_owned.deref(), owned.as_str());
+
+        let (cow_owned, owned) = {
+            let val = &String::from("&String");
+            let (cow, owned) = test(val);
+            assert_eq!(
+                mem::discriminant(&cow),
+                mem::discriminant(&Cow::Owned(GString::new()))
+            );
+            (cow, owned)
+        };
+        assert_eq!(cow_owned.deref(), owned.as_str());
     }
 }
